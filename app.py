@@ -52,10 +52,13 @@ def noticias_yfinance(ticker):
             if not title:
                 continue
             url_obj = c.get('canonicalUrl') or {}
+            prov = c.get('provider') or c.get('publisher') or 'Yahoo Finance'
+            if isinstance(prov, dict):
+                prov = prov.get('displayName') or prov.get('name') or 'Yahoo Finance'
             out.append({
-                'titulo': title,
-                'fuente': c.get('provider') or c.get('publisher') or 'Yahoo Finance',
-                'link': url_obj.get('url') or c.get('link') or ''
+                'titulo': str(title),
+                'fuente': str(prov),
+                'link': str(url_obj.get('url') or c.get('link') or '')
             })
     except Exception:
         pass
@@ -68,10 +71,11 @@ def noticias_rss(url, fuente_default):
         d = feedparser.parse(url)
         for e in d.entries[:10]:
             src = e.get('source', {})
+            fu = src.get('title', fuente_default) if isinstance(src, dict) else fuente_default
             out.append({
-                'titulo': e.get('title', ''),
-                'fuente': src.get('title', fuente_default) if isinstance(src, dict) else fuente_default,
-                'link': e.get('link', '')
+                'titulo': str(e.get('title', '')),
+                'fuente': str(fu or fuente_default),
+                'link': str(e.get('link', ''))
             })
     except Exception:
         pass
@@ -93,7 +97,7 @@ def noticias_sec(ticker):
             link_el = entry.find(ns + 'link')
             link = link_el.get('href', '') if link_el is not None else ''
             if title:
-                out.append({'titulo': title, 'fuente': 'SEC EDGAR (8-K)', 'link': link})
+                out.append({'titulo': str(title), 'fuente': 'SEC EDGAR (8-K)', 'link': str(link)})
     except Exception:
         pass
     return out
@@ -158,8 +162,8 @@ def analisis_gemini(ticker, key):
     if not noticias:
         return None
 
-    lista = "\n".join(["- " + n['titulo'] + " (" + n['fuente'] + ")" for n in noticias])
-    sec = "\n".join(["- " + n['titulo'] for n in noticias if n['fuente'].startswith('SEC')]) or "- sin documentos recientes"
+    lista = "\n".join(["- " + str(n['titulo']) + " (" + str(n['fuente']) + ")" for n in noticias])
+    sec = "\n".join(["- " + str(n['titulo']) for n in noticias if str(n['fuente']).startswith('SEC')]) or "- sin documentos recientes"
 
     prompt = "Eres un analista financiero experto en bolsa de EE.UU. y opciones OTM.\n"
     prompt += "Empresa: " + ticker + "\n\n"
@@ -293,6 +297,6 @@ else:
     with st.expander("Ver las " + str(len(noticias_sel)) + " noticias originales con enlace"):
         for n in noticias_sel:
             if n['link']:
-                st.markdown("- [" + n['fuente'] + "](" + n['link'] + "): " + n['titulo'])
+                st.markdown("- [" + str(n['fuente']) + "](" + str(n['link']) + "): " + str(n['titulo']))
             else:
-                st.markdown("- " + n['fuente'] + ": " + n['titulo'])
+                st.markdown("- " + str(n['fuente']) + ": " + str(n['titulo']))
