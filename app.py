@@ -142,7 +142,7 @@ def veredicto_keyword(noticias):
 # ANALISIS CON GEMINI (gratis) + DIAGNOSTICO
 # ==========================================
 
-MODELOS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
+MODELOS = ['gemini-3.8-flash', 'gemini-3-flash', 'gemini-2.0-flash-exp']
 
 def limpiar_json(txt):
     txt = txt.strip()
