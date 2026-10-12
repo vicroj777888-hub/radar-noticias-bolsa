@@ -142,7 +142,39 @@ def veredicto_keyword(noticias):
 # ANALISIS CON GEMINI (gratis) + DIAGNOSTICO
 # ==========================================
 
-MODELOS = ['gemini-3.8-flash', 'gemini-3-flash', 'gemini-2.0-flash-exp']
+MODELOS_PREFERIDOS = ['gemini-3.8-flash', 'gemini-flash-latest']
+
+@st.cache_data(ttl=86400)
+def modelos_disponibles(key):
+    """Pregunta a Google que modelos flash existen HOY (a prueba de renombres futuros)."""
+    try:
+        url = 'https://generativelanguage.googleapis.com/v1beta/models?key=' + key + '&pageSize=200'
+        r = requests.get(url, timeout=30)
+        if r.status_code == 200:
+            nombres = []
+            for m in r.json().get('models', []):
+                name = str(m.get('name', ''))
+                methods = m.get('supportedGenerationMethods', []) or []
+                corto = name.replace('models/', '')
+                if ('generateContent' in methods) and ('flash' in corto) and ('preview' not in corto) and ('exp' not in corto):
+                    nombres.append(corto)
+            return nombres
+    except Exception:
+        pass
+    return []
+
+def elegir_modelos(key):
+    disp = modelos_disponibles(key)
+    orden = []
+    for p in MODELOS_PREFERIDOS:
+        if p in disp and p not in orden:
+            orden.append(p)
+    for d in disp:
+        if d not in orden:
+            orden.append(d)
+    if not orden:
+        orden = list(MODELOS_PREFERIDOS)
+    return orden
 
 def limpiar_json(txt):
     txt = txt.strip()
@@ -166,7 +198,7 @@ def llamar_gemini(modelo, key, prompt):
 
 def analisis_gemini(ticker, key):
     """Pide a Gemini resumen en espanol + veredicto + enfoque en opciones.
-    Solo guarda en cache los EXITOS (un fallo ya no queda pegado 1 hora)."""
+    Reintenta solo ante saturacion temporal (503/429) y solo cachea exitos."""
     global DIAGNOSTICO
     DIAGNOSTICO = []
     if not key:
@@ -203,21 +235,26 @@ def analisis_gemini(ticker, key):
  "titulares_traducidos": ["traduccion al espanol de los 5 titulares mas importantes"]
 }"""
 
-    for modelo in MODELOS:
-        try:
-            r = llamar_gemini(modelo, key, prompt)
-            if r.status_code == 200:
-                data = r.json()
-                parts = data['candidates'][0]['content']['parts']
-                txt = ''.join([p.get('text', '') for p in parts])
-                resultado = json.loads(limpiar_json(txt))
-                st.session_state[ck] = (ahora, resultado)
-                return resultado
-            else:
-                DIAGNOSTICO.append(modelo + ' -> HTTP ' + str(r.status_code) + ' : ' + r.text[:300])
-        except Exception as e:
-            DIAGNOSTICO.append(modelo + ' -> ERROR ' + str(e)[:300])
-        time.sleep(2)
+    for modelo in elegir_modelos(key):
+        for intento in range(1, 4):
+            try:
+                r = llamar_gemini(modelo, key, prompt)
+                if r.status_code == 200:
+                    data = r.json()
+                    parts = data['candidates'][0]['content']['parts']
+                    txt = ''.join([p.get('text', '') for p in parts])
+                    resultado = json.loads(limpiar_json(txt))
+                    st.session_state[ck] = (ahora, resultado)
+                    return resultado
+                elif r.status_code in (429, 500, 503):
+                    DIAGNOSTICO.append(modelo + ' intento ' + str(intento) + ' -> HTTP ' + str(r.status_code) + ' (saturacion temporal, reintentando)')
+                    time.sleep(4 * intento)
+                else:
+                    DIAGNOSTICO.append(modelo + ' -> HTTP ' + str(r.status_code) + ' : ' + r.text[:300])
+                    break
+            except Exception as e:
+                DIAGNOSTICO.append(modelo + ' intento ' + str(intento) + ' -> ERROR ' + str(e)[:300])
+                time.sleep(3)
     return None
 
 # ==========================================
