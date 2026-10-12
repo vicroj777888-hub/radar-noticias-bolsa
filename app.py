@@ -31,7 +31,7 @@ def obtener_key_gemini():
     try:
         k = st.secrets['GEMINI_API_KEY']
         if k:
-            return k
+            return str(k)
     except Exception:
         pass
     return os.environ.get('GEMINI_API_KEY', '')
@@ -139,7 +139,7 @@ def veredicto_keyword(noticias):
     return 'NEUTRO', s
 
 # ==========================================
-# ANALISIS CON GEMINI (gratis)
+# ANALISIS CON GEMINI (gratis) + DIAGNOSTICO
 # ==========================================
 
 MODELOS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
@@ -153,14 +153,36 @@ def limpiar_json(txt):
             txt = txt[4:]
     return txt.strip()
 
-@st.cache_data(ttl=3600)
+DIAGNOSTICO = []
+
+def llamar_gemini(modelo, key, prompt):
+    url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelo + ':generateContent'
+    headers = {'x-goog-api-key': key, 'Content-Type': 'application/json'}
+    body = {
+        'contents': [{'parts': [{'text': prompt}]}],
+        'generationConfig': {'temperature': 0.4, 'responseMimeType': 'application/json'}
+    }
+    return requests.post(url, headers=headers, json=body, timeout=60)
+
 def analisis_gemini(ticker, key):
-    """Pide a Gemini resumen en espanol + veredicto + enfoque en opciones"""
+    """Pide a Gemini resumen en espanol + veredicto + enfoque en opciones.
+    Solo guarda en cache los EXITOS (un fallo ya no queda pegado 1 hora)."""
+    global DIAGNOSTICO
+    DIAGNOSTICO = []
     if not key:
+        DIAGNOSTICO.append('Sin clave GEMINI_API_KEY configurada en Secrets.')
         return None
     noticias = todas_las_noticias(ticker)
     if not noticias:
+        DIAGNOSTICO.append('No se recopilaron noticias para ' + ticker + '.')
         return None
+
+    ahora = time.time()
+    ck = 'ia_cache_' + ticker
+    if ck in st.session_state:
+        ts, val = st.session_state[ck]
+        if val is not None and (ahora - ts) < 3600:
+            return val
 
     lista = "\n".join(["- " + str(n['titulo']) + " (" + str(n['fuente']) + ")" for n in noticias])
     sec = "\n".join(["- " + str(n['titulo']) for n in noticias if str(n['fuente']).startswith('SEC')]) or "- sin documentos recientes"
@@ -182,18 +204,19 @@ def analisis_gemini(ticker, key):
 }"""
 
     for modelo in MODELOS:
-        url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelo + ':generateContent?key=' + key
-        body = {
-            'contents': [{'parts': [{'text': prompt}]}],
-            'generationConfig': {'temperature': 0.4, 'responseMimeType': 'application/json'}
-        }
         try:
-            r = requests.post(url, json=body, timeout=60)
+            r = llamar_gemini(modelo, key, prompt)
             if r.status_code == 200:
-                txt = r.json()['candidates'][0]['content']['parts'][0]['text']
-                return json.loads(limpiar_json(txt))
-        except Exception:
-            pass
+                data = r.json()
+                parts = data['candidates'][0]['content']['parts']
+                txt = ''.join([p.get('text', '') for p in parts])
+                resultado = json.loads(limpiar_json(txt))
+                st.session_state[ck] = (ahora, resultado)
+                return resultado
+            else:
+                DIAGNOSTICO.append(modelo + ' -> HTTP ' + str(r.status_code) + ' : ' + r.text[:300])
+        except Exception as e:
+            DIAGNOSTICO.append(modelo + ' -> ERROR ' + str(e)[:300])
         time.sleep(2)
     return None
 
@@ -230,9 +253,17 @@ st.caption("Selecciona una empresa abajo para el analisis completo con IA (resum
 
 # ---------- panel lateral ----------
 st.sidebar.header("Panel")
+if KEY:
+    st.sidebar.caption("Clave Gemini: " + KEY[:6] + '...' + KEY[-4:] + " (cargada)")
+else:
+    st.sidebar.caption("Clave Gemini: NO DETECTADA")
+
 ticker_sel = st.sidebar.selectbox("Empresa a analizar con IA", TICKERS)
 if st.sidebar.button("Recargar todo"):
     st.cache_data.clear()
+    for k in list(st.session_state.keys()):
+        if str(k).startswith('ia_cache_'):
+            del st.session_state[k]
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -293,6 +324,8 @@ else:
     else:
         v, s = veredicto_keyword(noticias_sel)
         st.info("Analisis IA no disponible. Sentimiento rapido por palabras clave: " + v + " (puntaje " + str(s) + ").")
+        with st.expander("Ver por que fallo la IA (diagnostico)"):
+            st.code("\n".join(DIAGNOSTICO) or 'Sin detalles del fallo.')
 
     with st.expander("Ver las " + str(len(noticias_sel)) + " noticias originales con enlace"):
         for n in noticias_sel:
