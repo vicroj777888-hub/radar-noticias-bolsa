@@ -197,7 +197,7 @@ def llamar_gemini(modelo, key, prompt):
     return requests.post(url, headers=headers, json=body, timeout=60)
 
 def analisis_gemini(ticker, key):
-    """Pide a Gemini resumen en espanol + veredicto + enfoque en opciones.
+    """Pide a Gemini resumen en espanol + veredicto + DOS horizontes OTM.
     Reintenta solo ante saturacion temporal (503/429) y solo cachea exitos."""
     global DIAGNOSTICO
     DIAGNOSTICO = []
@@ -223,6 +223,7 @@ def analisis_gemini(ticker, key):
     prompt += "Empresa: " + ticker + "\n\n"
     prompt += "NOTICIAS RECIENTES (titular | fuente):\n" + lista + "\n\n"
     prompt += "DOCUMENTOS OFICIALES SEC (8-K):\n" + sec + "\n\n"
+    prompt += "HORIZONTE DEL TRADER: opera posiciones semanales (entra entre lunes y miercoles, cierra a mas tardar en el cierre del viernes). Tambien mantiene una lectura de mediano plazo como referencia.\n\n"
     prompt += """Responde UNICAMENTE con este JSON valido, en espanol:
 {
  "resumen": "resumen de 3-4 frases de la situacion actual de la empresa",
@@ -231,7 +232,8 @@ def analisis_gemini(ticker, key):
  "bajistas": ["razones concretas de posible baja"],
  "veredicto": "ALCISTA o BAJISTA o NEUTRO",
  "confianza": 75,
- "opciones": "conclusion de 2-3 frases para operar opciones OTM de esta empresa: que lado favorece (CALL / PUT / esperar) y por que",
+ "opciones_corto": "conclusion de 2-3 frases para opciones OTM de MUY CORTO plazo (de hoy al cierre del viernes, 5 dias o menos): que lado favorece (CALL / PUT / esperar), que catalizadores de ESTA semana lo justifican, y advertencia de theta/gamma en vencimientos semanales",
+ "opciones_medio": "conclusion de 2-3 frases para opciones OTM de mediano plazo (30 a 60 dias): que lado favorece (CALL / PUT / esperar) y por que",
  "titulares_traducidos": ["traduccion al espanol de los 5 titulares mas importantes"]
 }"""
 
@@ -307,9 +309,10 @@ st.sidebar.markdown("---")
 st.sidebar.markdown(
     "**Como usar esta app:**\n"
     "1. Mira el veredicto IA y la confianza.\n"
-    "2. Lee el enfoque en opciones OTM.\n"
-    "3. Confirma el MOMENTO de entrada en el Radar de Francotirador.\n"
-    "4. Nunca operes solo por noticia: espera vela formada."
+    "2. Lee el recuadro NARANJA: opciones OTM de esta semana (tu horizonte real).\n"
+    "3. Lee el recuadro AZUL: opciones OTM 30-60 dias (referencia de contexto).\n"
+    "4. Confirma el MOMENTO de entrada en el Radar de Francotirador.\n"
+    "5. Nunca operes solo por noticia: espera vela formada."
 )
 
 # ---------- analisis completo de la empresa elegida ----------
@@ -335,7 +338,9 @@ else:
 
         st.markdown("**Resumen economico:** " + str(ia.get('resumen', '')))
 
-        st.info("**ENFOQUE EN OPCIONES OTM:** " + str(ia.get('opciones', '')))
+        st.warning("**OPCIONES OTM - CORTO PLAZO (esta semana, 5 dias o menos, cierre viernes):** " + str(ia.get('opciones_corto', ia.get('opciones', ''))))
+
+        st.info("**OPCIONES OTM - MEDIANO PLAZO (30 a 60 dias):** " + str(ia.get('opciones_medio', ia.get('opciones', ''))))
 
         ev = ia.get('eventos', [])
         if ev:
@@ -367,6 +372,7 @@ else:
     with st.expander("Ver las " + str(len(noticias_sel)) + " noticias originales con enlace"):
         for n in noticias_sel:
             if n['link']:
-                st.markdown("- [" + str(n['fuente']) + "](" + str(n['link']) + "): " + str(n['titulo']))
+                st.markdown("- [" + str(n['fuente']) + "](" + str(n['link']) + "): " + str(n['titulo'])
+)
             else:
                 st.markdown("- " + str(n['fuente']) + ": " + str(n['titulo']))
